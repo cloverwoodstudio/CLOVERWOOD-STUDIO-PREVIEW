@@ -1,0 +1,60 @@
+name: Deploy Temporary Website Preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out preview repository
+        uses: actions/checkout@v6
+
+      - name: Download generated static website
+        run: |
+          curl --fail --location --retry 3 \
+            'https://sdmntprnortheu.oaiusercontent.com/files/00000000-62f4-81f4-93ae-7fecc0d45188/raw?se=2026-08-03T21:27:20Z&sp=r&sv=2026-02-06&sr=b&scid=702a8a8b-e2f9-5980-b460-914980b48c0e&skoid=e5f84a89-964a-4fd3-92c2-c2cb3a12ea16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T19:29:44Z&ske=2026-08-04T19:29:44Z&sks=b&skv=2026-02-06&sig=3pyvoQljSJ24ufkMk9uNitp2giD2PGALibl/AFDv2T4%3D' \
+            --output preview.zip
+          mkdir site
+          unzip -q preview.zip -d site
+
+      - name: Validate public preview boundary
+        run: |
+          test -f site/index.html
+          grep -q 'noindex, nofollow' site/index.html
+          if grep -R -i -E 'company os|api[_ -]?key|secret|password' site --include='*.html' --include='*.css' --include='*.xml' --include='*.txt'; then
+            echo 'Forbidden internal content found in public preview.'
+            exit 1
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload static website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy preview
+        id: deployment
+        uses: actions/deploy-pages@v4
