@@ -26,7 +26,7 @@ jobs:
       - name: Download generated static website
         run: |
           curl --fail --location --retry 3 \
-            'https://sdmntprnortheu.oaiusercontent.com/files/00000000-62f4-81f4-93ae-7fecc0d45188/raw?se=2026-08-03T21:27:20Z&sp=r&sv=2026-02-06&sr=b&scid=702a8a8b-e2f9-5980-b460-914980b48c0e&skoid=e5f84a89-964a-4fd3-92c2-c2cb3a12ea16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T19:29:44Z&ske=2026-08-04T19:29:44Z&sks=b&skv=2026-02-06&sig=3pyvoQljSJ24ufkMk9uNitp2giD2PGALibl/AFDv2T4%3D' \
+            'https://sdmntprpolandcentral.oaiusercontent.com/files/00000000-abd4-820a-880c-fe43712eb8f0/raw?se=2026-08-03T21:34:38Z&sp=r&sv=2026-02-06&sr=b&scid=c3853ef5-e1f3-54ec-9829-09ca8ef52f9a&skoid=e5f84a89-964a-4fd3-92c2-c2cb3a12ea16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T19:23:44Z&ske=2026-08-04T19:23:44Z&sks=b&skv=2026-02-06&sig=TEtFDFr2U4f/5mR9YCN5Mv7m0FMnZ8tEC1d7k8L8KQo%3D' \
             --output preview.zip
           mkdir site
           unzip -q preview.zip -d site
