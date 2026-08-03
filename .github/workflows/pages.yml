@@ -55,20 +55,29 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy preview
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Record deployed preview URL
+  notify:
+    needs: [validate, deploy]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record deployment result
         uses: actions/github-script@v8
         env:
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
         with:
           script: |
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: 2,
-              body: `PREVIEW_DEPLOYED\n${process.env.PAGE_URL}`
+              body: `PREVIEW_DEPLOYMENT_RESULT\nvalidate=${process.env.VALIDATE_RESULT}\ndeploy=${process.env.DEPLOY_RESULT}\nurl=${process.env.PAGE_URL || ''}`
             })
