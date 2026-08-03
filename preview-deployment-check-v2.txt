@@ -1,0 +1,1 @@
+Validate temporary GitHub Pages deployment after one-time Pages enablement.
