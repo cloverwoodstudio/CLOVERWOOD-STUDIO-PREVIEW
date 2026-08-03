@@ -3,8 +3,6 @@ name: Deploy Temporary Website Preview
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +12,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: pages
+  group: pages-main
   cancel-in-progress: true
 
 jobs:
@@ -26,7 +24,7 @@ jobs:
 
       - name: Download generated static website
         env:
-          PREVIEW_ARTIFACT_URL_B64: aHR0cHM6Ly9zZG1udHBycG9sYW5kY2VudHJhbC5vYWl1c2VyY29udGVudC5jb20vZmlsZXMvMDAwMDAwMDAtZjQyMC04MjBhLTk5N2EtMDU4ZmY0Mzc3NzczL3Jhdz9zZT0yMDI2LTA4LTAzVDIxOjU3OjE4WiZzcD1yJnN2PTIwMjYtMDItMDYmc3I9YiZzY2lkPTdkZThjN2IwLWJhOWItNTUyMC05ZWM4LTc4YmFmN2Y0ODNjNSZza29pZD1lNWY4NGE4OS05NjRhLTRmZDMtOTJjMi1jMmNiM2ExMmVhMTYmc2t0aWQ9YTQ4Y2NhNTYtZTZkYS00ODRlLWE4MTQtOWM4NDk2NTJiY2IzJnNrdD0yMDI2LTA4LTAzVDE5OjI5OjMzWiZza2U9MjAyNi0wOC0wNFQxOToyOTozM1omc2tzPWImc2t2PTIwMjYtMDItMDYmc2lnPXRvTzclMkJNZDBJQ1dtS0FKOHJiejAwVk1UdE5vQUUlMkJhdGV6UE5uam5xUVJrJTNE
+          PREVIEW_ARTIFACT_URL_B64: aHR0cHM6Ly9zZG1udHByaXRhbHlub3J0aC5vYWl1c2VyY29udGVudC5jb20vZmlsZXMvMDAwMDAwMDAtZjE0OC04MjQ2LWI5OGMtNmQ5ZGIwNzg0MDYzL3Jhdz9zZT0yMDI2LTA4LTAzVDIyOjAwOjM3WiZzcD1yJnN2PTIwMjYtMDItMDYmc3I9YiZzY2lkPWEyMzk5Y2I5LTA3ZjYtNWVmZC1hYjlkLTY3NTdjOGFiZWJhMyZza29pZD1lNWY4NGE4OS05NjRhLTRmZDMtOTJjMi1jMmNiM2ExMmVhMTYmc2t0aWQ9YTQ4Y2NhNTYtZTZkYS00ODRlLWE4MTQtOWM4NDk2NTJiY2IzJnNrdD0yMDI2LTA4LTAzVDE5OjE5OjM0WiZza2U9MjAyNi0wOC0wNFQxOToxOTozNFomc2tzPWImc2t2PTIwMjYtMDItMDYmc2lnPWtvR2hEMTFINlA0MklLYUlNOWJvZUZneGNHa1VmVHAzeTBYYmNybm9KdmMlM0Q=
         run: |
           artifact_url="$(printf '%s' "$PREVIEW_ARTIFACT_URL_B64" | base64 --decode)"
           curl --fail --location --retry 3 "$artifact_url" --output preview.zip
