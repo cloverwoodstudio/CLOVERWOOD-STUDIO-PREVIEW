@@ -1,10 +1,60 @@
 name: Deploy Temporary Website Preview
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
-  hold:
+  validate:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo 'Preview payload upload in progress.'
+      - name: Check out preview repository
+        uses: actions/checkout@v6
+
+      - name: Download generated static website
+        env:
+          PREVIEW_ARTIFACT_URL_B64: aHR0cHM6Ly9zZG1udHBybm9ydGhldS5vYWl1c2VyY29udGVudC5jb20vZmlsZXMvMDAwMDAwMDAtZDA2NC04MWY0LTgyNjItMTY2NWI2MDgzYmQ5L3Jhdz9zZT0yMDI2LTA4LTAzVDIxOjQ1OjMwWiZzcD1yJnN2PTIwMjYtMDItMDYmc3I9YiZzY2lkPWZhMmFkYmU4LTAyZTAtNWY3Yy05ODE4LTI2ZjM0NjdjNWQwMyZza29pZD1lNWY4NGE4OS05NjRhLTRmZDMtOTJjMi1jMmNiM2ExMmVhMTYmc2t0aWQ9YTQ4Y2NhNTYtZTZkYS00ODRlLWE4MTQtOWM4NDk2NTJiY2IzJnNrdD0yMDI2LTA4LTAzVDE5OjQxOjI1WiZza2U9MjAyNi0wOC0wNFQxOTo0MToyNVomc2tzPWImc2t2PTIwMjYtMDItMDYmc2lnPTRkZzNKTFE4L2cyYW1DbG8lMkI1UGhaL1ZvbHBSUDFaOFBUckc2Z0VuQnY1USUzRA==
+        run: |
+          artifact_url="$(printf '%s' "$PREVIEW_ARTIFACT_URL_B64" | base64 --decode)"
+          curl --fail --location --retry 3 "$artifact_url" --output preview.zip
+          rm -rf site
+          mkdir site
+          unzip -q preview.zip -d site
+
+      - name: Validate public preview boundary
+        run: |
+          test -f site/index.html
+          grep -q 'noindex, nofollow' site/index.html
+          if grep -R -i -E 'company os|api[_ -]?key|secret|password' site --include='*.html' --include='*.css' --include='*.xml' --include='*.txt'; then
+            echo 'Forbidden internal content found in public preview.'
+            exit 1
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload static website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy preview
+        id: deployment
+        uses: actions/deploy-pages@v4
