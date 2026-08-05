@@ -1,0 +1,125 @@
+{
+  "title": "Cloverwood Logo Family",
+  "version": "1.2.1",
+  "status": "APPROVED — LOCKED",
+  "supersedes": "1.2",
+  "approved_system": {
+    "display": "C3 soft-fade leaf vein",
+    "small": "C2 soft leaf vein + B medium outline/letter thickness",
+    "central_cross": "unchanged",
+    "outer_geometry": "unchanged",
+    "qa_backgrounds": [
+      "dark",
+      "light"
+    ],
+    "qa_sizes_px": [
+      72,
+      48,
+      32
+    ]
+  },
+  "members": [
+    {
+      "name": "Cloverwood Studio",
+      "slug": "cloverwood-studio",
+      "role": "parent",
+      "initial": null,
+      "small_note": "readability-adjusted parent tone"
+    },
+    {
+      "name": "Cloverwood",
+      "slug": "cloverwood",
+      "role": "world",
+      "initial": "C"
+    },
+    {
+      "name": "NUKU",
+      "slug": "nuku",
+      "role": "world",
+      "initial": "N",
+      "small_note": "B medium thickness"
+    },
+    {
+      "name": "Studio OS",
+      "slug": "studio-os",
+      "role": "software",
+      "initial": "S",
+      "note": "organic optical revision approved",
+      "small_note": "B medium thickness"
+    },
+    {
+      "name": "Bridge OS",
+      "slug": "bridge-os",
+      "role": "software",
+      "initial": "B",
+      "note": "lighter outline and initial for dark-background readability",
+      "small_note": "B medium thickness"
+    }
+  ],
+  "assets": [
+    {
+      "file": "cloverwood-studio-display.svg",
+      "sha256": "2c5539f82d38cdd10048ad05b23b8ac46abfeb2c24d329a237b010a4f7f56def",
+      "variant": "display-c3"
+    },
+    {
+      "file": "cloverwood-studio-small.svg",
+      "sha256": "17d31d2e03aa42eee7df07a47b7c06a35aa8262921fd0daf8223b28a5b0594c7",
+      "variant": "small-c2-b-thickness"
+    },
+    {
+      "file": "cloverwood-display.svg",
+      "sha256": "28bcb70f579225e18bd82c1e50b0511c4b522f3a17faca709f07108bf035e38e",
+      "variant": "display-c3"
+    },
+    {
+      "file": "cloverwood-small.svg",
+      "sha256": "abcc1ea986746a6ed68a181c5aaefa961cc0244307fd855dd0a94ddfdc08eace",
+      "variant": "small-c2-b-thickness"
+    },
+    {
+      "file": "nuku-display.svg",
+      "sha256": "e83cfcd59b7055abe78a13224244129a5843a608cc9d0ee342f6a971d2e7a8d3",
+      "variant": "display-c3"
+    },
+    {
+      "file": "nuku-small.svg",
+      "sha256": "e4162d4b537726f0366ebd33f6e5473056fc1098344ad418414de2931758a608",
+      "variant": "small-c2-b-thickness"
+    },
+    {
+      "file": "studio-os-display.svg",
+      "sha256": "5e64727ca2e243aba1ccec24fc21352a22dd0870c582a228529bad8d088303da",
+      "variant": "display-c3"
+    },
+    {
+      "file": "studio-os-small.svg",
+      "sha256": "90b17a92d4631dcaf4590c42c76a254772f8973ad02c7e0789a379887db2fe6b",
+      "variant": "small-c2-b-thickness"
+    },
+    {
+      "file": "bridge-os-display.svg",
+      "sha256": "16ce28d630f4ded6b6bb163210afa903daec51be95c6bafba15d38364675a252",
+      "variant": "display-c3"
+    },
+    {
+      "file": "bridge-os-small.svg",
+      "sha256": "bd7b469bf6017c42202f556f8e095b954fde4ec4bdbe8f7d316611ece3912ccd",
+      "variant": "small-c2-b-thickness"
+    }
+  ],
+  "proofs": [
+    {
+      "file": "final-family-proof-02-dark.png",
+      "sha256": "bf4703483d7ede642d2c2d6fdc44778c1aab9fc695c852ede9793da1a297a80a"
+    },
+    {
+      "file": "final-family-proof-02-light.png",
+      "sha256": "4de040ae69814c350d10ca600cd28a4142faff9e83f85d72449f4bff4cd4e317"
+    },
+    {
+      "file": "final-family-proof-02-mobile.png",
+      "sha256": "a3720647661aba8d7c5a16ae87d7b518fe29182e865c12eb0383009543655b1c"
+    }
+  ]
+}
