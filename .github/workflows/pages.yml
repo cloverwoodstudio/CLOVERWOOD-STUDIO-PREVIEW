@@ -22,21 +22,283 @@ jobs:
       - name: Check out preview repository
         uses: actions/checkout@v6
 
-      - name: Download generated static website
-        env:
-          PREVIEW_ARTIFACT_URL_B64: aHR0cHM6Ly9zZG1udHByaXRhbHlub3J0aC5vYWl1c2VyY29udGVudC5jb20vZmlsZXMvMDAwMDAwMDAtZjE0OC04MjQ2LWI5OGMtNmQ5ZGIwNzg0MDYzL3Jhdz9zZT0yMDI2LTA4LTAzVDIyOjAwOjM3WiZzcD1yJnN2PTIwMjYtMDItMDYmc3I9YiZzY2lkPWEyMzk5Y2I5LTA3ZjYtNWVmZC1hYjlkLTY3NTdjOGFiZWJhMyZza29pZD1lNWY4NGE4OS05NjRhLTRmZDMtOTJjMi1jMmNiM2ExMmVhMTYmc2t0aWQ9YTQ4Y2NhNTYtZTZkYS00ODRlLWE4MTQtOWM4NDk2NTJiY2IzJnNrdD0yMDI2LTA4LTAzVDE5OjE5OjM0WiZza2U9MjAyNi0wOC0wNFQxOToxOTozNFomc2tzPWImc2t2PTIwMjYtMDItMDYmc2lnPWtvR2hEMTFINlA0MklLYUlNOWJvZUZneGNHa1VmVHAzeTBYYmNybm9KdmMlM0Q=
+      - name: Capture live baseline and apply locked icons
+        shell: bash
         run: |
-          artifact_url="$(printf '%s' "$PREVIEW_ARTIFACT_URL_B64" | base64 --decode)"
-          curl --fail --location --retry 3 "$artifact_url" --output preview.zip
-          rm -rf site
-          mkdir site
-          unzip -q preview.zip -d site
+          set -euo pipefail
+          rm -rf deployment-site
+          mkdir deployment-site
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import re
+          from html.parser import HTMLParser
+          from pathlib import Path, PurePosixPath
+          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+          from urllib.request import Request, urlopen
+
+          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
+          BASE = urlsplit(BASE_URL)
+          BASE_PATH = BASE.path
+          SITE_ROOT = Path('deployment-site')
+
+          REQUIRED_PATHS = [
+              '404.html',
+              '_astro/SiteLayout.BEvXq4m0.css',
+              '_astro/montserrat-cyrillic-ext-wght-normal.CO5hGrJv.woff2',
+              '_astro/montserrat-cyrillic-wght-normal.EAA9jha_.woff2',
+              '_astro/montserrat-latin-ext-wght-normal.BsZE-iaG.woff2',
+              '_astro/montserrat-latin-wght-normal.l_AIctKy.woff2',
+              '_astro/montserrat-vietnamese-wght-normal.k7S-YeeD.woff2',
+              '_astro/source-sans-3-cyrillic-ext-wght-normal.DzyfIafT.woff2',
+              '_astro/source-sans-3-cyrillic-wght-normal.BMDVbyM7.woff2',
+              '_astro/source-sans-3-greek-ext-wght-normal.BWSLJLk6.woff2',
+              '_astro/source-sans-3-greek-wght-normal.C9H9m1vD.woff2',
+              '_astro/source-sans-3-latin-ext-wght-normal.C8iNium2.woff2',
+              '_astro/source-sans-3-latin-wght-normal.BqRLTx4X.woff2',
+              '_astro/source-sans-3-vietnamese-wght-normal.C1uRvKPU.woff2',
+              'artwork/cloverwood-home-hero-v0.3.webp',
+              'brand/bridge-os-symbol-master-v1.0.svg',
+              'brand/cloverwood-studio-symbol-web-v0.2.svg',
+              'brand/icon-harmonia-outline-24.svg',
+              'brand/icon-prepojenie-outline-24.svg',
+              'brand/icon-priroda-outline-24.svg',
+              'brand/icon-studio-outline-24.svg',
+              'brand/icon-svet-outline-24.svg',
+              'brand/icon-system-outline-24.svg',
+              'brand/nuku-symbol-master-v1.1.svg',
+              'bridge-os/index.html',
+              'cloverwood/index.html',
+              'index.html',
+              'kontakt/index.html',
+              'nuku/index.html',
+              'o-studiu/index.html',
+              'robots.txt',
+              'sitemap.xml',
+              'studio-os/index.html',
+          ]
+
+          REPLACEMENTS = {
+              'brand/cloverwood-studio-symbol-web-v0.2.svg': (
+                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-studio-small.svg'),
+                  '17d31d2e03aa42eee7df07a47b7c06a35aa8262921fd0daf8223b28a5b0594c7',
+              ),
+              'brand/nuku-symbol-master-v1.1.svg': (
+                  Path('site/assets/logo-family/family-v1.2.1/nuku-small.svg'),
+                  'e4162d4b537726f0366ebd33f6e5473056fc1098344ad418414de2931758a608',
+              ),
+              'brand/bridge-os-symbol-master-v1.0.svg': (
+                  Path('site/assets/logo-family/family-v1.2.1/bridge-os-small.svg'),
+                  'bd7b469bf6017c42202f556f8e095b954fde4ec4bdbe8f7d316611ece3912ccd',
+              ),
+          }
+
+          class ReferenceParser(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__(convert_charrefs=True)
+                  self.references: list[str] = []
+
+              def handle_starttag(
+                  self,
+                  tag: str,
+                  attrs: list[tuple[str, str | None]],
+              ) -> None:
+                  values = dict(attrs)
+                  for name in ('src', 'href', 'poster'):
+                      value = values.get(name)
+                      if value:
+                          self.references.append(value)
+                  srcset = values.get('srcset')
+                  if srcset:
+                      for candidate in srcset.split(','):
+                          value = candidate.strip().split(' ', 1)[0]
+                          if value:
+                              self.references.append(value)
+
+          def clean_url(url: str) -> str:
+              parts = urlsplit(url)
+              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+
+          def destination_for(url: str) -> Path | None:
+              parts = urlsplit(clean_url(url))
+              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
+                  return None
+
+              path = parts.path
+              if path == BASE_PATH.rstrip('/'):
+                  relative = 'index.html'
+              elif path.startswith(BASE_PATH):
+                  relative = path[len(BASE_PATH):]
+                  if not relative or relative.endswith('/'):
+                      relative += 'index.html'
+              else:
+                  return None
+
+              pure = PurePosixPath(unquote(relative))
+              if pure.is_absolute() or '..' in pure.parts:
+                  raise RuntimeError(f'Unsafe local path derived from URL: {url}')
+              return SITE_ROOT.joinpath(*pure.parts)
+
+          def references_from(path: Path, source_url: str) -> list[str]:
+              suffix = path.suffix.lower()
+              data = path.read_bytes()
+              refs: list[str] = []
+
+              if suffix == '.html':
+                  parser = ReferenceParser()
+                  parser.feed(data.decode('utf-8', errors='strict'))
+                  refs.extend(parser.references)
+              elif suffix == '.css':
+                  text = data.decode('utf-8', errors='strict')
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'url\(\s*(["\']?)(.*?)\1\s*\)',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'@import\s+(["\'])(.*?)\1',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+
+              resolved: list[str] = []
+              for ref in refs:
+                  if not ref or ref.startswith(
+                      ('#', 'data:', 'mailto:', 'tel:', 'javascript:')
+                  ):
+                      continue
+                  absolute = clean_url(urljoin(source_url, ref))
+                  if destination_for(absolute) is not None:
+                      resolved.append(absolute)
+              return resolved
+
+          before: dict[str, str] = {}
+          source_urls: dict[str, str] = {}
+
+          for relative in REQUIRED_PATHS:
+              source_url = clean_url(urljoin(BASE_URL, relative))
+              destination = SITE_ROOT / relative
+              request = Request(
+                  source_url,
+                  headers={
+                      'User-Agent': 'Cloverwood-locked-icon-deployment/1.0',
+                      'Accept-Encoding': 'identity',
+                  },
+                  method='GET',
+              )
+              with urlopen(request, timeout=30) as response:
+                  status = response.status
+                  body = response.read()
+
+              if status != 200:
+                  raise RuntimeError(
+                      f'HTTP {status} for required live file: {source_url}'
+                  )
+
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(body)
+              before[relative] = hashlib.sha256(body).hexdigest()
+              source_urls[relative] = source_url
+
+          captured = sorted(
+              path.relative_to(SITE_ROOT).as_posix()
+              for path in SITE_ROOT.rglob('*')
+              if path.is_file()
+          )
+          if captured != sorted(REQUIRED_PATHS):
+              raise RuntimeError(
+                  f'Captured inventory differs from locked 33-file baseline: {captured}'
+              )
+
+          index_text = (SITE_ROOT / 'index.html').read_text(encoding='utf-8')
+          if not re.search(
+              r'noindex\s*,\s*nofollow',
+              index_text,
+              flags=re.IGNORECASE,
+          ):
+              raise RuntimeError(
+                  'index.html does not contain noindex, nofollow.'
+              )
+
+          unresolved: list[tuple[str, str]] = []
+          for relative in REQUIRED_PATHS:
+              path = SITE_ROOT / relative
+              if path.suffix.lower() not in {'.html', '.css'}:
+                  continue
+              for reference_url in references_from(
+                  path,
+                  source_urls[relative],
+              ):
+                  destination = destination_for(reference_url)
+                  if destination is not None and not destination.is_file():
+                      unresolved.append((relative, reference_url))
+
+          if unresolved:
+              raise RuntimeError(
+                  f'Unresolved same-origin HTML/CSS references: {unresolved}'
+              )
+
+          for destination, (source, expected_sha) in REPLACEMENTS.items():
+              source_body = source.read_bytes()
+              source_sha = hashlib.sha256(source_body).hexdigest()
+              if source_sha != expected_sha:
+                  raise RuntimeError(
+                      f'Locked source SHA mismatch for {source}: '
+                      f'{source_sha} != {expected_sha}'
+                  )
+              (SITE_ROOT / destination).write_bytes(source_body)
+
+          after = {
+              relative: hashlib.sha256(
+                  (SITE_ROOT / relative).read_bytes()
+              ).hexdigest()
+              for relative in REQUIRED_PATHS
+          }
+          changed = sorted(
+              relative
+              for relative in REQUIRED_PATHS
+              if before[relative] != after[relative]
+          )
+          expected_changed = sorted(REPLACEMENTS)
+
+          if changed != expected_changed:
+              raise RuntimeError(
+                  f'Expected exactly three locked icon changes '
+                  f'{expected_changed}; got {changed}'
+              )
+
+          for destination, (_, expected_sha) in REPLACEMENTS.items():
+              if after[destination] != expected_sha:
+                  raise RuntimeError(
+                      f'Final SHA mismatch for {destination}: '
+                      f'{after[destination]} != {expected_sha}'
+                  )
+
+          print(f'Captured files: {len(REQUIRED_PATHS)}')
+          print('Changed files:')
+          for relative in changed:
+              print(
+                  f'- {relative}: '
+                  f'{before[relative]} -> {after[relative]}'
+              )
+          print('All other captured files remained byte-identical.')
+          print('noindex, nofollow: PASS')
+          print('Same-origin HTML/CSS references: PASS')
+          PY
 
       - name: Validate public preview boundary
         run: |
-          test -f site/index.html
-          grep -q 'noindex, nofollow' site/index.html
-          if grep -R -i -E 'company os|api[_ -]?key|secret|password' site --include='*.html' --include='*.css' --include='*.xml' --include='*.txt'; then
+          test -f deployment-site/index.html
+          grep -q 'noindex, nofollow' deployment-site/index.html
+          if grep -R -i -E 'company os|api[_ -]?key|secret|password' deployment-site --include='*.html' --include='*.css' --include='*.xml' --include='*.txt'; then
             echo 'Forbidden internal content found in public preview.'
             exit 1
           fi
@@ -47,7 +309,7 @@ jobs:
       - name: Upload static website
         uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: deployment-site
 
   deploy:
     needs: validate
