@@ -85,9 +85,17 @@ jobs:
                   Path('site/assets/logo-family/family-v1.2.1/cloverwood-studio-small.svg'),
                   '17d31d2e03aa42eee7df07a47b7c06a35aa8262921fd0daf8223b28a5b0594c7',
               ),
+              'brand/icon-svet-outline-24.svg': (
+                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-small.svg'),
+                  'abcc1ea986746a6ed68a181c5aaefa961cc0244307fd855dd0a94ddfdc08eace',
+              ),
               'brand/nuku-symbol-master-v1.1.svg': (
                   Path('site/assets/logo-family/family-v1.2.1/nuku-small.svg'),
                   'e4162d4b537726f0366ebd33f6e5473056fc1098344ad418414de2931758a608',
+              ),
+              'brand/icon-studio-outline-24.svg': (
+                  Path('site/assets/logo-family/family-v1.2.1/studio-os-small.svg'),
+                  '90b17a92d4631dcaf4590c42c76a254772f8973ad02c7e0789a379887db2fe6b',
               ),
               'brand/bridge-os-symbol-master-v1.0.svg': (
                   Path('site/assets/logo-family/family-v1.2.1/bridge-os-small.svg'),
@@ -267,28 +275,24 @@ jobs:
               for relative in REQUIRED_PATHS
               if before[relative] != after[relative]
           )
-          expected_changed = sorted(REPLACEMENTS)
+          expected_changed = sorted(
+              destination
+              for destination, (_, expected_sha) in REPLACEMENTS.items()
+              if before[destination] != expected_sha
+          )
 
-          if changed == expected_changed:
-              deployment_state = 'STATE A - first replacement'
-          elif not changed:
-              unlocked_live = sorted(
-                  destination
-                  for destination, (_, expected_sha) in REPLACEMENTS.items()
-                  if before[destination] != expected_sha
-              )
-              if unlocked_live:
-                  raise RuntimeError(
-                      'Zero files changed after replacement, but live SVG '
-                      f'SHA values were not already locked: {unlocked_live}'
-                  )
-              deployment_state = 'STATE B - already deployed and stable'
-          else:
+          if changed != expected_changed:
               raise RuntimeError(
-                  'Expected either zero changes for an already locked '
-                  'deployment or exactly the three authorized icon changes '
-                  f'{expected_changed}; got {changed}'
+                  'Changed paths do not match live SVG files requiring '
+                  f'locked replacement: expected {expected_changed}; got {changed}'
               )
+
+          if changed:
+              deployment_state = (
+                  f'STATE A - applied {len(changed)} locked icon replacement(s)'
+              )
+          else:
+              deployment_state = 'STATE B - all five icons already deployed and stable'
 
           for destination, (_, expected_sha) in REPLACEMENTS.items():
               if after[destination] != expected_sha:
@@ -307,7 +311,7 @@ jobs:
                       f'{before[relative]} -> {after[relative]}'
                   )
           else:
-              print('- none; all three live SVG files were already locked')
+              print('- none; all five live SVG files were already locked')
           print('All other captured files remained byte-identical.')
           print('noindex, nofollow: PASS')
           print('Same-origin HTML/CSS references: PASS')
@@ -332,7 +336,9 @@ jobs:
           VERSION = 'logo-family-1.2.1'
           ICON_FILENAMES = (
               'cloverwood-studio-symbol-web-v0.2.svg',
+              'icon-svet-outline-24.svg',
               'nuku-symbol-master-v1.1.svg',
+              'icon-studio-outline-24.svg',
               'bridge-os-symbol-master-v1.0.svg',
           )
           pattern = re.compile(
