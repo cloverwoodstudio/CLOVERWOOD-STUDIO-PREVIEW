@@ -9,7 +9,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  issues: write
+  pull-requests: write
 
 concurrency:
   group: pages-main
@@ -269,9 +269,24 @@ jobs:
           )
           expected_changed = sorted(REPLACEMENTS)
 
-          if changed != expected_changed:
+          if changed == expected_changed:
+              deployment_state = 'STATE A - first replacement'
+          elif not changed:
+              unlocked_live = sorted(
+                  destination
+                  for destination, (_, expected_sha) in REPLACEMENTS.items()
+                  if before[destination] != expected_sha
+              )
+              if unlocked_live:
+                  raise RuntimeError(
+                      'Zero files changed after replacement, but live SVG '
+                      f'SHA values were not already locked: {unlocked_live}'
+                  )
+              deployment_state = 'STATE B - already deployed and stable'
+          else:
               raise RuntimeError(
-                  f'Expected exactly three locked icon changes '
+                  'Expected either zero changes for an already locked '
+                  'deployment or exactly the three authorized icon changes '
                   f'{expected_changed}; got {changed}'
               )
 
@@ -283,15 +298,174 @@ jobs:
                   )
 
           print(f'Captured files: {len(REQUIRED_PATHS)}')
+          print(f'Deployment state: {deployment_state}')
           print('Changed files:')
-          for relative in changed:
-              print(
-                  f'- {relative}: '
-                  f'{before[relative]} -> {after[relative]}'
-              )
+          if changed:
+              for relative in changed:
+                  print(
+                      f'- {relative}: '
+                      f'{before[relative]} -> {after[relative]}'
+                  )
+          else:
+              print('- none; all three live SVG files were already locked')
           print('All other captured files remained byte-identical.')
           print('noindex, nofollow: PASS')
           print('Same-origin HTML/CSS references: PASS')
+          PY
+
+      - name: Cache-bust locked icon references
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import re
+          from html.parser import HTMLParser
+          from pathlib import Path, PurePosixPath
+          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+
+          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
+          BASE = urlsplit(BASE_URL)
+          BASE_PATH = BASE.path
+          SITE_ROOT = Path('deployment-site')
+          VERSION = 'logo-family-1.2.1'
+          ICON_FILENAMES = (
+              'cloverwood-studio-symbol-web-v0.2.svg',
+              'nuku-symbol-master-v1.1.svg',
+              'bridge-os-symbol-master-v1.0.svg',
+          )
+          pattern = re.compile(
+              r'(?P<name>'
+              + '|'.join(re.escape(name) for name in ICON_FILENAMES)
+              + r')(?:\?v=[A-Za-z0-9._-]+)?'
+          )
+          counts = {name: 0 for name in ICON_FILENAMES}
+          changed_files: list[str] = []
+
+          for path in sorted(SITE_ROOT.rglob('*')):
+              if not path.is_file() or path.suffix.lower() not in {'.html', '.css'}:
+                  continue
+              original = path.read_text(encoding='utf-8')
+
+              def replace(match: re.Match[str]) -> str:
+                  name = match.group('name')
+                  counts[name] += 1
+                  return f'{name}?v={VERSION}'
+
+              rewritten = pattern.sub(replace, original)
+              if rewritten != original:
+                  path.write_text(rewritten, encoding='utf-8')
+                  changed_files.append(path.relative_to(SITE_ROOT).as_posix())
+
+          missing = sorted(name for name, count in counts.items() if count == 0)
+          if missing:
+              raise RuntimeError(
+                  f'No HTML/CSS references found for locked icons: {missing}'
+              )
+
+          class ReferenceParser(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__(convert_charrefs=True)
+                  self.references: list[str] = []
+
+              def handle_starttag(
+                  self,
+                  tag: str,
+                  attrs: list[tuple[str, str | None]],
+              ) -> None:
+                  values = dict(attrs)
+                  for name in ('src', 'href', 'poster'):
+                      value = values.get(name)
+                      if value:
+                          self.references.append(value)
+                  srcset = values.get('srcset')
+                  if srcset:
+                      for candidate in srcset.split(','):
+                          value = candidate.strip().split(' ', 1)[0]
+                          if value:
+                              self.references.append(value)
+
+          def clean_url(url: str) -> str:
+              parts = urlsplit(url)
+              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+
+          def destination_for(url: str) -> Path | None:
+              parts = urlsplit(clean_url(url))
+              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
+                  return None
+              path = parts.path
+              if path == BASE_PATH.rstrip('/'):
+                  relative = 'index.html'
+              elif path.startswith(BASE_PATH):
+                  relative = path[len(BASE_PATH):]
+                  if not relative or relative.endswith('/'):
+                      relative += 'index.html'
+              else:
+                  return None
+              pure = PurePosixPath(unquote(relative))
+              if pure.is_absolute() or '..' in pure.parts:
+                  raise RuntimeError(f'Unsafe local path derived from URL: {url}')
+              return SITE_ROOT.joinpath(*pure.parts)
+
+          def references_from(path: Path, source_url: str) -> list[str]:
+              text = path.read_text(encoding='utf-8')
+              refs: list[str] = []
+              if path.suffix.lower() == '.html':
+                  parser = ReferenceParser()
+                  parser.feed(text)
+                  refs.extend(parser.references)
+              else:
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'url\(\s*(["\']?)(.*?)\1\s*\)',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'@import\s+(["\'])(.*?)\1',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+              return [
+                  urljoin(source_url, ref)
+                  for ref in refs
+                  if ref and not ref.startswith(
+                      ('#', 'data:', 'mailto:', 'tel:', 'javascript:')
+                  )
+              ]
+
+          unresolved: list[tuple[str, str]] = []
+          for path in sorted(SITE_ROOT.rglob('*')):
+              if not path.is_file() or path.suffix.lower() not in {'.html', '.css'}:
+                  continue
+              relative = path.relative_to(SITE_ROOT).as_posix()
+              source_url = urljoin(BASE_URL, relative)
+              for reference_url in references_from(path, source_url):
+                  destination = destination_for(reference_url)
+                  if destination is not None and not destination.is_file():
+                      unresolved.append((relative, reference_url))
+
+          if unresolved:
+              raise RuntimeError(
+                  f'Unresolved references after cache busting: {unresolved}'
+              )
+
+          print('Cache-busted locked icon references:')
+          for name in ICON_FILENAMES:
+              print(f'- {name}: {counts[name]} reference(s)')
+          print('Changed HTML/CSS files:')
+          if changed_files:
+              for relative in changed_files:
+                  print(f'- {relative}')
+          else:
+              print('- none; references were already versioned')
+          print('Post-cache-bust same-origin references: PASS')
           PY
 
       - name: Validate public preview boundary
