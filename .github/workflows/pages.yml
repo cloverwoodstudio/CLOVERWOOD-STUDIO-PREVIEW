@@ -9,7 +9,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  issues: write
+  pull-requests: write
 
 concurrency:
   group: pages-main
@@ -269,9 +269,24 @@ jobs:
           )
           expected_changed = sorted(REPLACEMENTS)
 
-          if changed != expected_changed:
+          if changed == expected_changed:
+              deployment_state = 'STATE A - first replacement'
+          elif not changed:
+              unlocked_live = sorted(
+                  destination
+                  for destination, (_, expected_sha) in REPLACEMENTS.items()
+                  if before[destination] != expected_sha
+              )
+              if unlocked_live:
+                  raise RuntimeError(
+                      'Zero files changed after replacement, but live SVG '
+                      f'SHA values were not already locked: {unlocked_live}'
+                  )
+              deployment_state = 'STATE B - already deployed and stable'
+          else:
               raise RuntimeError(
-                  f'Expected exactly three locked icon changes '
+                  'Expected either zero changes for an already locked '
+                  'deployment or exactly the three authorized icon changes '
                   f'{expected_changed}; got {changed}'
               )
 
@@ -283,12 +298,16 @@ jobs:
                   )
 
           print(f'Captured files: {len(REQUIRED_PATHS)}')
+          print(f'Deployment state: {deployment_state}')
           print('Changed files:')
-          for relative in changed:
-              print(
-                  f'- {relative}: '
-                  f'{before[relative]} -> {after[relative]}'
-              )
+          if changed:
+              for relative in changed:
+                  print(
+                      f'- {relative}: '
+                      f'{before[relative]} -> {after[relative]}'
+                  )
+          else:
+              print('- none; all three live SVG files were already locked')
           print('All other captured files remained byte-identical.')
           print('noindex, nofollow: PASS')
           print('Same-origin HTML/CSS references: PASS')
