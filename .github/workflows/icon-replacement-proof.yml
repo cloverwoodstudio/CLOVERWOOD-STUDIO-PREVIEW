@@ -1,0 +1,509 @@
+name: Cloverwood Locked Icon Replacement Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out proof branch
+        uses: actions/checkout@v6
+
+      - name: Verify proof workflow safety boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('.github/workflows/icon-replacement-proof.yml')
+          text = path.read_text(encoding='utf-8')
+
+          forbidden = [
+              'actions/' + 'deploy-pages@',
+              'pages:' + ' write',
+              'id-token:' + ' write',
+          ]
+          found = [item for item in forbidden if item in text]
+          if found:
+              raise SystemExit(f'Forbidden deployment capability found: {found}')
+
+          if not re.search(
+              r'^on:\n  workflow_dispatch:\n\npermissions:\n  contents: read\n',
+              text,
+              flags=re.MULTILINE,
+          ):
+              raise SystemExit('Workflow trigger or permissions boundary differs from workflow_dispatch + contents: read.')
+          PY
+
+      - name: Capture exact live website response bodies
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf proof-output
+          mkdir -p proof-output/patched-site
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          from collections import deque
+          from datetime import datetime, timezone
+          from html.parser import HTMLParser
+          from pathlib import Path, PurePosixPath
+          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+          from urllib.request import Request, urlopen
+
+          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
+          BASE = urlsplit(BASE_URL)
+          BASE_PATH = BASE.path
+          SITE_ROOT = Path('proof-output/patched-site')
+          MANIFEST_PATH = Path('proof-output/captured-site-before-manifest.json')
+
+          # Explicit public-site inventory from the currently published preview bundle.
+          REQUIRED_PATHS = [
+              'index.html',
+              '404.html',
+              'robots.txt',
+              'sitemap.xml',
+              'kontakt/index.html',
+              'o-studiu/index.html',
+              'bridge-os/index.html',
+              'nuku/index.html',
+              'studio-os/index.html',
+              'cloverwood/index.html',
+              'artwork/cloverwood-home-hero-v0.3.webp',
+              'brand/cloverwood-studio-symbol-web-v0.2.svg',
+              'brand/bridge-os-symbol-master-v1.0.svg',
+              'brand/nuku-symbol-master-v1.1.svg',
+              'brand/icon-system-outline-24.svg',
+              'brand/icon-prepojenie-outline-24.svg',
+              'brand/icon-studio-outline-24.svg',
+              'brand/icon-harmonia-outline-24.svg',
+              'brand/icon-priroda-outline-24.svg',
+              'brand/icon-svet-outline-24.svg',
+              '_astro/SiteLayout.BEvXq4m0.css',
+              '_astro/source-sans-3-cyrillic-wght-normal.BMDVbyM7.woff2',
+              '_astro/montserrat-latin-wght-normal.l_AIctKy.woff2',
+              '_astro/source-sans-3-greek-ext-wght-normal.BWSLJLk6.woff2',
+              '_astro/montserrat-cyrillic-ext-wght-normal.CO5hGrJv.woff2',
+              '_astro/source-sans-3-latin-wght-normal.BqRLTx4X.woff2',
+              '_astro/source-sans-3-greek-wght-normal.C9H9m1vD.woff2',
+              '_astro/montserrat-cyrillic-wght-normal.EAA9jha_.woff2',
+              '_astro/montserrat-latin-ext-wght-normal.BsZE-iaG.woff2',
+              '_astro/source-sans-3-vietnamese-wght-normal.C1uRvKPU.woff2',
+              '_astro/montserrat-vietnamese-wght-normal.k7S-YeeD.woff2',
+              '_astro/source-sans-3-latin-ext-wght-normal.C8iNium2.woff2',
+              '_astro/source-sans-3-cyrillic-ext-wght-normal.DzyfIafT.woff2',
+          ]
+
+          class ReferenceParser(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__(convert_charrefs=True)
+                  self.references: list[str] = []
+
+              def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+                  values = dict(attrs)
+                  for name in ('src', 'href', 'poster'):
+                      value = values.get(name)
+                      if value:
+                          self.references.append(value)
+                  srcset = values.get('srcset')
+                  if srcset:
+                      for candidate in srcset.split(','):
+                          value = candidate.strip().split(' ', 1)[0]
+                          if value:
+                              self.references.append(value)
+
+          def clean_url(url: str) -> str:
+              parts = urlsplit(url)
+              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+
+          def destination_for(url: str) -> Path | None:
+              parts = urlsplit(clean_url(url))
+              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
+                  return None
+
+              path = parts.path
+              if path == BASE_PATH.rstrip('/'):
+                  relative = 'index.html'
+              elif path.startswith(BASE_PATH):
+                  relative = path[len(BASE_PATH):]
+                  if not relative or relative.endswith('/'):
+                      relative += 'index.html'
+              else:
+                  return None
+
+              relative = unquote(relative)
+              pure = PurePosixPath(relative)
+              if pure.is_absolute() or '..' in pure.parts:
+                  raise RuntimeError(f'Unsafe local path derived from URL: {url}')
+              return SITE_ROOT.joinpath(*pure.parts)
+
+          def references_from(path: Path, source_url: str) -> list[str]:
+              suffix = path.suffix.lower()
+              data = path.read_bytes()
+              refs: list[str] = []
+
+              if suffix == '.html':
+                  parser = ReferenceParser()
+                  parser.feed(data.decode('utf-8', errors='strict'))
+                  refs.extend(parser.references)
+              elif suffix == '.css':
+                  text = data.decode('utf-8', errors='strict')
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'url\(\s*(["\']?)(.*?)\1\s*\)',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(
+                          r'@import\s+(["\'])(.*?)\1',
+                          text,
+                          flags=re.IGNORECASE,
+                      )
+                  )
+
+              resolved: list[str] = []
+              for ref in refs:
+                  if not ref or ref.startswith(('#', 'data:', 'mailto:', 'tel:', 'javascript:')):
+                      continue
+                  absolute = clean_url(urljoin(source_url, ref))
+                  if destination_for(absolute) is not None:
+                      resolved.append(absolute)
+              return resolved
+
+          queue: deque[str] = deque(
+              clean_url(urljoin(BASE_URL, path)) for path in REQUIRED_PATHS
+          )
+          queued = set(queue)
+          captured: dict[str, dict[str, object]] = {}
+
+          while queue:
+              source_url = queue.popleft()
+              destination = destination_for(source_url)
+              if destination is None:
+                  raise RuntimeError(f'Required URL escaped the project origin/path: {source_url}')
+              relative = destination.relative_to(SITE_ROOT).as_posix()
+              if relative in captured:
+                  continue
+
+              request = Request(
+                  source_url,
+                  headers={
+                      'User-Agent': 'Cloverwood-read-only-icon-proof/1.0',
+                      'Accept-Encoding': 'identity',
+                  },
+                  method='GET',
+              )
+              with urlopen(request, timeout=30) as response:
+                  status = response.status
+                  body = response.read()
+                  resolved_url = response.geturl()
+
+              if status != 200:
+                  raise RuntimeError(f'HTTP {status} for required live file: {source_url}')
+
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(body)
+              captured[relative] = {
+                  'source_url': source_url,
+                  'resolved_url': resolved_url,
+                  'http_status': status,
+                  'repository_relative_proof_path': f'proof-output/patched-site/{relative}',
+                  'size': len(body),
+                  'sha256': hashlib.sha256(body).hexdigest(),
+              }
+
+              for discovered in references_from(destination, source_url):
+                  discovered_destination = destination_for(discovered)
+                  if discovered_destination is None:
+                      continue
+                  discovered_relative = discovered_destination.relative_to(SITE_ROOT).as_posix()
+                  if discovered_relative not in captured and discovered not in queued:
+                      queue.append(discovered)
+                      queued.add(discovered)
+
+          missing_required = [path for path in REQUIRED_PATHS if not (SITE_ROOT / path).is_file()]
+          if missing_required:
+              raise RuntimeError(f'Missing explicitly required files: {missing_required}')
+
+          index_text = (SITE_ROOT / 'index.html').read_text(encoding='utf-8')
+          if not re.search(r'noindex\s*,\s*nofollow', index_text, flags=re.IGNORECASE):
+              raise RuntimeError('index.html does not contain noindex, nofollow.')
+
+          unresolved: list[dict[str, str]] = []
+          for relative, item in sorted(captured.items()):
+              local_path = SITE_ROOT / relative
+              if local_path.suffix.lower() not in {'.html', '.css'}:
+                  continue
+              for reference_url in references_from(local_path, str(item['source_url'])):
+                  reference_destination = destination_for(reference_url)
+                  if reference_destination is not None and not reference_destination.is_file():
+                      unresolved.append({
+                          'from': relative,
+                          'url': reference_url,
+                          'expected_path': reference_destination.relative_to(SITE_ROOT).as_posix(),
+                      })
+          if unresolved:
+              raise RuntimeError(f'Unresolved same-origin HTML/CSS references: {json.dumps(unresolved, indent=2)}')
+
+          files = [
+              {'path': relative, **captured[relative]}
+              for relative in sorted(captured)
+          ]
+          manifest = {
+              'capture_timestamp_utc': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+              'base_url': BASE_URL,
+              'total_file_count': len(files),
+              'total_byte_size': sum(int(item['size']) for item in files),
+              'files': files,
+          }
+          MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          print(f"Captured {manifest['total_file_count']} files / {manifest['total_byte_size']} bytes")
+          PY
+
+      - name: Replace only the three authorized brand symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f proof-output/patched-site/brand/cloverwood-studio-symbol-web-v0.2.svg
+          test -f proof-output/patched-site/brand/nuku-symbol-master-v1.1.svg
+          test -f proof-output/patched-site/brand/bridge-os-symbol-master-v1.0.svg
+
+          cp -- \
+            site/assets/logo-family/family-v1.2.1/cloverwood-studio-small.svg \
+            proof-output/patched-site/brand/cloverwood-studio-symbol-web-v0.2.svg
+
+          cp -- \
+            site/assets/logo-family/family-v1.2.1/nuku-small.svg \
+            proof-output/patched-site/brand/nuku-symbol-master-v1.1.svg
+
+          cp -- \
+            site/assets/logo-family/family-v1.2.1/bridge-os-small.svg \
+            proof-output/patched-site/brand/bridge-os-symbol-master-v1.0.svg
+
+      - name: Validate byte scope and create after manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          from datetime import datetime, timezone
+          from html.parser import HTMLParser
+          from pathlib import Path, PurePosixPath
+          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+
+          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
+          BASE = urlsplit(BASE_URL)
+          BASE_PATH = BASE.path
+          SITE_ROOT = Path('proof-output/patched-site')
+          BEFORE_PATH = Path('proof-output/captured-site-before-manifest.json')
+          AFTER_PATH = Path('proof-output/captured-site-after-manifest.json')
+          REPORT_PATH = Path('proof-output/replacement-report.md')
+
+          REPLACEMENTS = {
+              'brand/cloverwood-studio-symbol-web-v0.2.svg': Path('site/assets/logo-family/family-v1.2.1/cloverwood-studio-small.svg'),
+              'brand/nuku-symbol-master-v1.1.svg': Path('site/assets/logo-family/family-v1.2.1/nuku-small.svg'),
+              'brand/bridge-os-symbol-master-v1.0.svg': Path('site/assets/logo-family/family-v1.2.1/bridge-os-small.svg'),
+          }
+
+          class ReferenceParser(HTMLParser):
+              def __init__(self) -> None:
+                  super().__init__(convert_charrefs=True)
+                  self.references: list[str] = []
+
+              def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+                  values = dict(attrs)
+                  for name in ('src', 'href', 'poster'):
+                      value = values.get(name)
+                      if value:
+                          self.references.append(value)
+                  srcset = values.get('srcset')
+                  if srcset:
+                      for candidate in srcset.split(','):
+                          value = candidate.strip().split(' ', 1)[0]
+                          if value:
+                              self.references.append(value)
+
+          def clean_url(url: str) -> str:
+              parts = urlsplit(url)
+              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+
+          def destination_for(url: str) -> Path | None:
+              parts = urlsplit(clean_url(url))
+              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
+                  return None
+              path = parts.path
+              if path == BASE_PATH.rstrip('/'):
+                  relative = 'index.html'
+              elif path.startswith(BASE_PATH):
+                  relative = path[len(BASE_PATH):]
+                  if not relative or relative.endswith('/'):
+                      relative += 'index.html'
+              else:
+                  return None
+              pure = PurePosixPath(unquote(relative))
+              if pure.is_absolute() or '..' in pure.parts:
+                  raise RuntimeError(f'Unsafe path from URL: {url}')
+              return SITE_ROOT.joinpath(*pure.parts)
+
+          def references_from(path: Path, source_url: str) -> list[str]:
+              refs: list[str] = []
+              suffix = path.suffix.lower()
+              data = path.read_bytes()
+              if suffix == '.html':
+                  parser = ReferenceParser()
+                  parser.feed(data.decode('utf-8', errors='strict'))
+                  refs.extend(parser.references)
+              elif suffix == '.css':
+                  text = data.decode('utf-8', errors='strict')
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(r'url\(\s*(["\']?)(.*?)\1\s*\)', text, flags=re.IGNORECASE)
+                  )
+                  refs.extend(
+                      match.group(2).strip()
+                      for match in re.finditer(r'@import\s+(["\'])(.*?)\1', text, flags=re.IGNORECASE)
+                  )
+              result: list[str] = []
+              for ref in refs:
+                  if not ref or ref.startswith(('#', 'data:', 'mailto:', 'tel:', 'javascript:')):
+                      continue
+                  absolute = clean_url(urljoin(source_url, ref))
+                  if destination_for(absolute) is not None:
+                      result.append(absolute)
+              return result
+
+          before = json.loads(BEFORE_PATH.read_text(encoding='utf-8'))
+          before_files = {item['path']: item for item in before['files']}
+
+          after_files: dict[str, dict[str, object]] = {}
+          for path in sorted(p for p in SITE_ROOT.rglob('*') if p.is_file()):
+              relative = path.relative_to(SITE_ROOT).as_posix()
+              body = path.read_bytes()
+              source_item = before_files.get(relative)
+              if source_item is None:
+                  raise RuntimeError(f'Unexpected file added to captured website: {relative}')
+              after_files[relative] = {
+                  **source_item,
+                  'size': len(body),
+                  'sha256': hashlib.sha256(body).hexdigest(),
+              }
+
+          if set(after_files) != set(before_files):
+              missing = sorted(set(before_files) - set(after_files))
+              added = sorted(set(after_files) - set(before_files))
+              raise RuntimeError(f'Captured file set changed. Missing={missing}; Added={added}')
+
+          changed = sorted(
+              path for path in before_files
+              if before_files[path]['sha256'] != after_files[path]['sha256']
+          )
+          expected = sorted(REPLACEMENTS)
+          if changed != expected:
+              raise RuntimeError(f'Expected exactly three authorized changes {expected}; got {changed}')
+
+          rows: list[dict[str, str]] = []
+          for destination, source in REPLACEMENTS.items():
+              source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+              destination_sha = str(after_files[destination]['sha256'])
+              if destination_sha != source_sha:
+                  raise RuntimeError(
+                      f'Replacement SHA mismatch for {destination}: destination={destination_sha}, source={source_sha}'
+                  )
+              rows.append({
+                  'destination': destination,
+                  'source': source.as_posix(),
+                  'before_sha256': str(before_files[destination]['sha256']),
+                  'after_sha256': destination_sha,
+              })
+
+          index_text = (SITE_ROOT / 'index.html').read_text(encoding='utf-8')
+          if not re.search(r'noindex\s*,\s*nofollow', index_text, flags=re.IGNORECASE):
+              raise RuntimeError('noindex, nofollow was not preserved.')
+
+          unresolved: list[dict[str, str]] = []
+          for relative, item in sorted(after_files.items()):
+              path = SITE_ROOT / relative
+              if path.suffix.lower() not in {'.html', '.css'}:
+                  continue
+              for reference_url in references_from(path, str(item['source_url'])):
+                  destination = destination_for(reference_url)
+                  if destination is not None and not destination.is_file():
+                      unresolved.append({
+                          'from': relative,
+                          'url': reference_url,
+                          'expected_path': destination.relative_to(SITE_ROOT).as_posix(),
+                      })
+          if unresolved:
+              raise RuntimeError(f'Unresolved references after replacement: {json.dumps(unresolved, indent=2)}')
+
+          files = [
+              {'path': path, **after_files[path]}
+              for path in sorted(after_files)
+          ]
+          after = {
+              'capture_timestamp_utc': before['capture_timestamp_utc'],
+              'replacement_validation_timestamp_utc': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+              'base_url': BASE_URL,
+              'total_file_count': len(files),
+              'total_byte_size': sum(int(item['size']) for item in files),
+              'changed_file_count': len(changed),
+              'changed_files': changed,
+              'files': files,
+          }
+          AFTER_PATH.write_text(json.dumps(after, indent=2) + '\n', encoding='utf-8')
+
+          report = [
+              '# Cloverwood Icon Replacement Proof',
+              '',
+              '- Source: unchanged response bodies captured from the public GitHub Pages preview.',
+              '- Scope: exactly three authorized SVG replacements.',
+              '- Deployment: none.',
+              '- HTML/CSS/JavaScript/layout/text/fonts/artwork/routes: unchanged.',
+              '- `noindex, nofollow`: preserved.',
+              '- Same-origin HTML/CSS references: resolved.',
+              '',
+              '| Destination | Locked source | Before SHA-256 | After/source SHA-256 |',
+              '|---|---|---|---|',
+          ]
+          for row in rows:
+              report.append(
+                  f"| `{row['destination']}` | `{row['source']}` | `{row['before_sha256']}` | `{row['after_sha256']}` |"
+              )
+          report.extend([
+              '',
+              f"Captured files: **{after['total_file_count']}**",
+              f"Patched byte size: **{after['total_byte_size']}**",
+              '',
+          ])
+          REPORT_PATH.write_text('\n'.join(report), encoding='utf-8')
+          print(json.dumps({'changed_files': changed, 'total_files': len(files)}, indent=2))
+          PY
+
+      - name: Upload non-deploying proof artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloverwood-icon-replacement-proof
+          path: proof-output
+          if-no-files-found: error
+          retention-days: 7
