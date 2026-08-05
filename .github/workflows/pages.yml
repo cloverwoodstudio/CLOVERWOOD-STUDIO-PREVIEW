@@ -86,20 +86,20 @@ jobs:
                   '17d31d2e03aa42eee7df07a47b7c06a35aa8262921fd0daf8223b28a5b0594c7',
               ),
               'brand/icon-svet-outline-24.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-small.svg'),
-                  'abcc1ea986746a6ed68a181c5aaefa961cc0244307fd855dd0a94ddfdc08eace',
+                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-display.svg'),
+                  '28bcb70f579225e18bd82c1e50b0511c4b522f3a17faca709f07108bf035e38e',
               ),
               'brand/nuku-symbol-master-v1.1.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/nuku-small.svg'),
-                  'e4162d4b537726f0366ebd33f6e5473056fc1098344ad418414de2931758a608',
+                  Path('site/assets/logo-family/family-v1.2.1/nuku-display.svg'),
+                  'e83cfcd59b7055abe78a13224244129a5843a608cc9d0ee342f6a971d2e7a8d3',
               ),
               'brand/icon-studio-outline-24.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/studio-os-small.svg'),
-                  '90b17a92d4631dcaf4590c42c76a254772f8973ad02c7e0789a379887db2fe6b',
+                  Path('site/assets/logo-family/family-v1.2.1/studio-os-display.svg'),
+                  '5e64727ca2e243aba1ccec24fc21352a22dd0870c582a228529bad8d088303da',
               ),
               'brand/bridge-os-symbol-master-v1.0.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/bridge-os-small.svg'),
-                  'bd7b469bf6017c42202f556f8e095b954fde4ec4bdbe8f7d316611ece3912ccd',
+                  Path('site/assets/logo-family/family-v1.2.1/bridge-os-display.svg'),
+                  '16ce28d630f4ded6b6bb163210afa903daec51be95c6bafba15d38364675a252',
               ),
           }
 
@@ -333,7 +333,7 @@ jobs:
           BASE = urlsplit(BASE_URL)
           BASE_PATH = BASE.path
           SITE_ROOT = Path('deployment-site')
-          VERSION = 'logo-family-1.2.1'
+          VERSION = 'logo-family-1.2.1-display-c3'
           ICON_FILENAMES = (
               'cloverwood-studio-symbol-web-v0.2.svg',
               'icon-svet-outline-24.svg',
