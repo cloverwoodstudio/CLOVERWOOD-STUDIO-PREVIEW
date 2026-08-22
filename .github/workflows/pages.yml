@@ -1,4 +1,4 @@
-name: Verify Current Cloverwood Website Preview
+name: Deploy Post-PR-760 Cloverwood Website Preview
 
 on:
   push:
@@ -6,39 +6,128 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
   statuses: write
 
 concurrency:
-  group: preview-live-verification
+  group: pages-main
   cancel-in-progress: true
 
 env:
-  SOURCE_SHA: 0ee5ec51cc4c8da7aa16288a75308bdf6c067666
+  SOURCE_REPO: cloverwoodstudio/CLOVERWOOD-STUDIO
+  SOURCE_SHA: bae0b0c9a6899c945770149fe9f6c9f3421e0beb
+  SOURCE_BUILD_HEAD: fb72d36852b9330268d7d2902f915371da0bb6e8
+  BUNDLE_SHA256: f51c32e3adcdc09e4f19bbe556694ca46c5489bd759f5aac72d81a2e5a2e1108
+  FAMILY_SYMBOL_SHA256: 431b571c473102d85570b55cb241e15d57d38cfc0311fb8b5481f47387da0387
+  BUNDLE_URL: 'https://sdmntprdenmarkeast.oaiusercontent.com/files/00000000-cf40-8210-8b8a-a813f7930755/raw?se=2026-08-22T21%3A00%3A51Z&sp=r&sv=2026-02-06&sr=b&scid=7ade773a-d84a-56f8-a803-89afb47edcd1&skoid=061609b8-1cdb-4a5b-9e68-c7ab9a523a8f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-22T08%3A29%3A18Z&ske=2026-08-23T08%3A29%3A18Z&sks=b&skv=2026-02-06&sig=/bEF5H8FtLO5mMx6NC3lu6Py5RTYpmybRj2Lg8czXv4%3D'
   PREVIEW_URL: https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/
 
 jobs:
-  verify-live:
-    if: contains(github.event.head_commit.message, '[preview-verify]')
+  validate:
+    if: contains(github.event.head_commit.message, '[preview-sync-pr760]')
     runs-on: ubuntu-24.04
     steps:
-      - name: Wait for authorized current preview
+      - name: Download exact validated static bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 "$BUNDLE_URL" -o bundle.zip
+          echo "$BUNDLE_SHA256  bundle.zip" | sha256sum -c -
+          rm -rf deployment-site
+          mkdir deployment-site
+          unzip -q bundle.zip -d deployment-site
+          touch deployment-site/.nojekyll
+
+      - name: Verify exact post-PR-760 preview boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f deployment-site/index.html
+          test -f deployment-site/404.html
+          test -f deployment-site/cloverwood/index.html
+          test -f deployment-site/nuku/index.html
+          test -f deployment-site/studio-os/index.html
+          test -f deployment-site/bridge-os/index.html
+          test -f deployment-site/o-studiu/index.html
+          test -f deployment-site/kontakt/index.html
+          test -f deployment-site/brand/cloverwood-studio-family-symbol.svg
+
+          echo "$FAMILY_SYMBOL_SHA256  deployment-site/brand/cloverwood-studio-family-symbol.svg" | sha256sum -c -
+
+          grep -Fq 'noindex, nofollow' deployment-site/index.html
+          grep -Fq 'My svet' deployment-site/index.html
+          grep -Fq 'My ho objavujeme.' deployment-site/index.html
+          grep -Fq 'Autorský svet s vlastným kánonom, postavami a pravidlami kontinuity.' deployment-site/index.html
+          grep -Fq 'Objaviť NUKU' deployment-site/index.html
+          grep -Fq 'Spoznať Studio OS' deployment-site/index.html
+          grep -Fq 'Spoznať Bridge OS' deployment-site/index.html
+
+          grep -Fq 'src="/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-studio-family-symbol.svg"' deployment-site/index.html
+          ! grep -Fq 'src="/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-studio-symbol-web-v0.2.svg"' deployment-site/index.html
+
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-world-family-symbol.svg' deployment-site/index.html
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/nuku-world-family-symbol.svg' deployment-site/index.html
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/studio-os-family-symbol.svg' deployment-site/index.html
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/bridge-os-family-symbol.svg' deployment-site/index.html
+
+          grep -Fq 'mailto:cloverwoodstudio@gmail.com' deployment-site/kontakt/index.html
+          grep -Fq 'Disallow: /' deployment-site/robots.txt
+          ! grep -RFiq 'Company OS' deployment-site/*.html deployment-site/*/index.html
+          ! grep -RFiq 'hreflang' deployment-site/*.html deployment-site/*/index.html
+          ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/CLOVERWOOD-STUDIO-PREVIEW/' deployment-site/index.html
+          test ! -e deployment-site/en
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: deployment-site
+
+  deploy:
+    if: contains(github.event.head_commit.message, '[preview-sync-pr760]')
+    needs: validate
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy preview
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-live:
+    if: contains(github.event.head_commit.message, '[preview-sync-pr760]')
+    needs: deploy
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Wait for exact post-PR-760 preview
         shell: bash
         run: |
           set -euo pipefail
           for attempt in {1..60}; do
             if curl --fail --silent --location "$PREVIEW_URL" -o live-index.html && \
-               grep -Fq 'Autorský svet s vlastným kánonom, postavami a pravidlami kontinuity.' live-index.html && \
-               grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-world-family-symbol.svg' live-index.html && \
-               grep -Fq '>NUKU<' live-index.html; then
-              echo 'Current authorized preview is live.'
+               grep -Fq 'src="/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-studio-family-symbol.svg"' live-index.html && \
+               grep -Fq 'Autorský svet s vlastným kánonom, postavami a pravidlami kontinuity.' live-index.html; then
+              echo 'Post-PR-760 preview is live.'
               exit 0
             fi
             sleep 5
           done
-          echo 'Authorized current preview did not become live within 5 minutes.'
+          echo 'Post-PR-760 preview did not become live within 5 minutes.'
           exit 1
 
-      - name: Verify live content boundaries
+      - name: Verify live content and symbols
         shell: bash
         run: |
           set -euo pipefail
@@ -51,21 +140,19 @@ jobs:
           grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/nuku-world-family-symbol.svg' live-index.html
           grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/studio-os-family-symbol.svg' live-index.html
           grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/bridge-os-family-symbol.svg' live-index.html
-
-          ! grep -Fq 'Svet príbehov, postáv a miest zakorenený v jednej živej logike.' live-index.html
-          ! grep -Fq 'Zistiť viac' live-index.html
-          ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/icon-svet-outline-24.svg' live-index.html
-          ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/nuku-symbol-master-v1.1.svg' live-index.html
-          ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/icon-studio-outline-24.svg' live-index.html
-          ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/bridge-os-symbol-master-v1.0.svg' live-index.html
+          ! grep -Fq 'src="/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-studio-symbol-web-v0.2.svg"' live-index.html
           ! grep -Fqi 'Company OS' live-index.html
           ! grep -Fqi 'hreflang' live-index.html
           ! grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/CLOVERWOOD-STUDIO-PREVIEW/' live-index.html
 
+          curl --fail --silent "$PREVIEW_URL"'brand/cloverwood-studio-family-symbol.svg' -o live-family-symbol.svg
+          echo "$FAMILY_SYMBOL_SHA256  live-family-symbol.svg" | sha256sum -c -
           curl --fail --silent "$PREVIEW_URL"'brand/cloverwood-world-family-symbol.svg' >/dev/null
           curl --fail --silent "$PREVIEW_URL"'brand/nuku-world-family-symbol.svg' >/dev/null
           curl --fail --silent "$PREVIEW_URL"'brand/studio-os-family-symbol.svg' >/dev/null
           curl --fail --silent "$PREVIEW_URL"'brand/bridge-os-family-symbol.svg' >/dev/null
+          curl --fail --silent "$PREVIEW_URL"'robots.txt' -o live-robots.txt
+          grep -Fq 'Disallow: /' live-robots.txt
           curl --fail --silent "$PREVIEW_URL"'kontakt/' -o live-contact.html
           grep -Fq 'mailto:cloverwoodstudio@gmail.com' live-contact.html
 
@@ -80,11 +167,10 @@ jobs:
           "$browser" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=1024,1366 --screenshot=screenshots/preview-tablet-1024.png "$PREVIEW_URL"
           "$browser" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,844 --screenshot=screenshots/preview-mobile-390.png "$PREVIEW_URL"
 
-      - name: Upload live preview screenshots
-        if: success()
+      - name: Upload post-PR-760 live screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: cloverwood-current-main-live-preview-screenshots
+          name: cloverwood-post-pr760-live-preview-screenshots
           path: screenshots/*.png
           if-no-files-found: error
           retention-days: 7
@@ -99,10 +185,10 @@ jobs:
           set -euo pipefail
           if [ "$JOB_STATUS" = 'success' ]; then
             state=success
-            description='Current main preview live verification passed'
+            description='Post-PR-760 preview live verification passed'
           else
             state=failure
-            description='Current main preview live verification failed'
+            description='Post-PR-760 preview live verification failed'
           fi
           export state description
           python3 - <<'PY' > status.json
