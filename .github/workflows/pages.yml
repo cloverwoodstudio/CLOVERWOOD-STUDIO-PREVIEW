@@ -1,492 +1,128 @@
-name: Deploy Temporary Website Preview
+name: Deploy Current Main Website Preview
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
-  pull-requests: write
 
 concurrency:
   group: pages-main
   cancel-in-progress: true
 
+env:
+  SOURCE_REPO: cloverwoodstudio/CLOVERWOOD-STUDIO
+  SOURCE_SHA: 0ee5ec51cc4c8da7aa16288a75308bdf6c067666
+  SOURCE_TREE: aa138f8952067cbfc53c0c42c1c700b026ec76b3
+  BUNDLE_SHA256: 500d9f97fff00107c02626563c108297047f3701c936c14ade26a3ba8df1fbab
+  BUNDLE_URL: 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-0f74-81f4-b4b2-bdc577a18279/raw?se=2026-08-22T18%3A49%3A22Z&sp=r&sv=2026-02-06&sr=b&scid=3b07ab66-89dc-5fc3-87e4-6d445a357007&skoid=061609b8-1cdb-4a5b-9e68-c7ab9a523a8f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-22T05%3A30%3A56Z&ske=2026-08-23T05%3A30%3A56Z&sks=b&skv=2026-02-06&sig=Tf%2BY5AJkCmKJ7IALR6h7QGbQE1vJ/vioAXs8vCJsJn0%3D'
+  PREVIEW_URL: https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/
+
 jobs:
   validate:
+    if: contains(github.event.head_commit.message, '[preview-sync]')
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out preview repository
-        uses: actions/checkout@v6
-
-      - name: Capture live baseline and apply locked icons
+      - name: Download exact validated static bundle
         shell: bash
         run: |
           set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 "$BUNDLE_URL" -o bundle.zip
+          echo "$BUNDLE_SHA256  bundle.zip" | sha256sum -c -
           rm -rf deployment-site
           mkdir deployment-site
+          unzip -q bundle.zip -d deployment-site
+          touch deployment-site/.nojekyll
 
-          python3 - <<'PY'
-          from __future__ import annotations
-
-          import hashlib
-          import re
-          from html.parser import HTMLParser
-          from pathlib import Path, PurePosixPath
-          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
-          from urllib.request import Request, urlopen
-
-          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
-          BASE = urlsplit(BASE_URL)
-          BASE_PATH = BASE.path
-          SITE_ROOT = Path('deployment-site')
-
-          REQUIRED_PATHS = [
-              '404.html',
-              '_astro/SiteLayout.BEvXq4m0.css',
-              '_astro/montserrat-cyrillic-ext-wght-normal.CO5hGrJv.woff2',
-              '_astro/montserrat-cyrillic-wght-normal.EAA9jha_.woff2',
-              '_astro/montserrat-latin-ext-wght-normal.BsZE-iaG.woff2',
-              '_astro/montserrat-latin-wght-normal.l_AIctKy.woff2',
-              '_astro/montserrat-vietnamese-wght-normal.k7S-YeeD.woff2',
-              '_astro/source-sans-3-cyrillic-ext-wght-normal.DzyfIafT.woff2',
-              '_astro/source-sans-3-cyrillic-wght-normal.BMDVbyM7.woff2',
-              '_astro/source-sans-3-greek-ext-wght-normal.BWSLJLk6.woff2',
-              '_astro/source-sans-3-greek-wght-normal.C9H9m1vD.woff2',
-              '_astro/source-sans-3-latin-ext-wght-normal.C8iNium2.woff2',
-              '_astro/source-sans-3-latin-wght-normal.BqRLTx4X.woff2',
-              '_astro/source-sans-3-vietnamese-wght-normal.C1uRvKPU.woff2',
-              'artwork/cloverwood-home-hero-v0.3.webp',
-              'brand/bridge-os-symbol-master-v1.0.svg',
-              'brand/cloverwood-studio-symbol-web-v0.2.svg',
-              'brand/icon-harmonia-outline-24.svg',
-              'brand/icon-prepojenie-outline-24.svg',
-              'brand/icon-priroda-outline-24.svg',
-              'brand/icon-studio-outline-24.svg',
-              'brand/icon-svet-outline-24.svg',
-              'brand/icon-system-outline-24.svg',
-              'brand/nuku-symbol-master-v1.1.svg',
-              'bridge-os/index.html',
-              'cloverwood/index.html',
-              'index.html',
-              'kontakt/index.html',
-              'nuku/index.html',
-              'o-studiu/index.html',
-              'robots.txt',
-              'sitemap.xml',
-              'studio-os/index.html',
-          ]
-
-          REPLACEMENTS = {
-              'brand/cloverwood-studio-symbol-web-v0.2.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-studio-small.svg'),
-                  '17d31d2e03aa42eee7df07a47b7c06a35aa8262921fd0daf8223b28a5b0594c7',
-              ),
-              'brand/icon-svet-outline-24.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/cloverwood-display.svg'),
-                  '28bcb70f579225e18bd82c1e50b0511c4b522f3a17faca709f07108bf035e38e',
-              ),
-              'brand/nuku-symbol-master-v1.1.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/nuku-display.svg'),
-                  'e83cfcd59b7055abe78a13224244129a5843a608cc9d0ee342f6a971d2e7a8d3',
-              ),
-              'brand/icon-studio-outline-24.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/studio-os-display.svg'),
-                  '5e64727ca2e243aba1ccec24fc21352a22dd0870c582a228529bad8d088303da',
-              ),
-              'brand/bridge-os-symbol-master-v1.0.svg': (
-                  Path('site/assets/logo-family/family-v1.2.1/bridge-os-display.svg'),
-                  '16ce28d630f4ded6b6bb163210afa903daec51be95c6bafba15d38364675a252',
-              ),
-          }
-
-          class ReferenceParser(HTMLParser):
-              def __init__(self) -> None:
-                  super().__init__(convert_charrefs=True)
-                  self.references: list[str] = []
-
-              def handle_starttag(
-                  self,
-                  tag: str,
-                  attrs: list[tuple[str, str | None]],
-              ) -> None:
-                  values = dict(attrs)
-                  for name in ('src', 'href', 'poster'):
-                      value = values.get(name)
-                      if value:
-                          self.references.append(value)
-                  srcset = values.get('srcset')
-                  if srcset:
-                      for candidate in srcset.split(','):
-                          value = candidate.strip().split(' ', 1)[0]
-                          if value:
-                              self.references.append(value)
-
-          def clean_url(url: str) -> str:
-              parts = urlsplit(url)
-              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
-
-          def destination_for(url: str) -> Path | None:
-              parts = urlsplit(clean_url(url))
-              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
-                  return None
-
-              path = parts.path
-              if path == BASE_PATH.rstrip('/'):
-                  relative = 'index.html'
-              elif path.startswith(BASE_PATH):
-                  relative = path[len(BASE_PATH):]
-                  if not relative or relative.endswith('/'):
-                      relative += 'index.html'
-              else:
-                  return None
-
-              pure = PurePosixPath(unquote(relative))
-              if pure.is_absolute() or '..' in pure.parts:
-                  raise RuntimeError(f'Unsafe local path derived from URL: {url}')
-              return SITE_ROOT.joinpath(*pure.parts)
-
-          def references_from(path: Path, source_url: str) -> list[str]:
-              suffix = path.suffix.lower()
-              data = path.read_bytes()
-              refs: list[str] = []
-
-              if suffix == '.html':
-                  parser = ReferenceParser()
-                  parser.feed(data.decode('utf-8', errors='strict'))
-                  refs.extend(parser.references)
-              elif suffix == '.css':
-                  text = data.decode('utf-8', errors='strict')
-                  refs.extend(
-                      match.group(2).strip()
-                      for match in re.finditer(
-                          r'url\(\s*(["\']?)(.*?)\1\s*\)',
-                          text,
-                          flags=re.IGNORECASE,
-                      )
-                  )
-                  refs.extend(
-                      match.group(2).strip()
-                      for match in re.finditer(
-                          r'@import\s+(["\'])(.*?)\1',
-                          text,
-                          flags=re.IGNORECASE,
-                      )
-                  )
-
-              resolved: list[str] = []
-              for ref in refs:
-                  if not ref or ref.startswith(
-                      ('#', 'data:', 'mailto:', 'tel:', 'javascript:')
-                  ):
-                      continue
-                  absolute = clean_url(urljoin(source_url, ref))
-                  if destination_for(absolute) is not None:
-                      resolved.append(absolute)
-              return resolved
-
-          before: dict[str, str] = {}
-          source_urls: dict[str, str] = {}
-
-          for relative in REQUIRED_PATHS:
-              source_url = clean_url(urljoin(BASE_URL, relative))
-              destination = SITE_ROOT / relative
-              request = Request(
-                  source_url,
-                  headers={
-                      'User-Agent': 'Cloverwood-locked-icon-deployment/1.0',
-                      'Accept-Encoding': 'identity',
-                  },
-                  method='GET',
-              )
-              with urlopen(request, timeout=30) as response:
-                  status = response.status
-                  body = response.read()
-
-              if status != 200:
-                  raise RuntimeError(
-                      f'HTTP {status} for required live file: {source_url}'
-                  )
-
-              destination.parent.mkdir(parents=True, exist_ok=True)
-              destination.write_bytes(body)
-              before[relative] = hashlib.sha256(body).hexdigest()
-              source_urls[relative] = source_url
-
-          captured = sorted(
-              path.relative_to(SITE_ROOT).as_posix()
-              for path in SITE_ROOT.rglob('*')
-              if path.is_file()
-          )
-          if captured != sorted(REQUIRED_PATHS):
-              raise RuntimeError(
-                  f'Captured inventory differs from locked 33-file baseline: {captured}'
-              )
-
-          index_text = (SITE_ROOT / 'index.html').read_text(encoding='utf-8')
-          if not re.search(
-              r'noindex\s*,\s*nofollow',
-              index_text,
-              flags=re.IGNORECASE,
-          ):
-              raise RuntimeError(
-                  'index.html does not contain noindex, nofollow.'
-              )
-
-          unresolved: list[tuple[str, str]] = []
-          for relative in REQUIRED_PATHS:
-              path = SITE_ROOT / relative
-              if path.suffix.lower() not in {'.html', '.css'}:
-                  continue
-              for reference_url in references_from(
-                  path,
-                  source_urls[relative],
-              ):
-                  destination = destination_for(reference_url)
-                  if destination is not None and not destination.is_file():
-                      unresolved.append((relative, reference_url))
-
-          if unresolved:
-              raise RuntimeError(
-                  f'Unresolved same-origin HTML/CSS references: {unresolved}'
-              )
-
-          for destination, (source, expected_sha) in REPLACEMENTS.items():
-              source_body = source.read_bytes()
-              source_sha = hashlib.sha256(source_body).hexdigest()
-              if source_sha != expected_sha:
-                  raise RuntimeError(
-                      f'Locked source SHA mismatch for {source}: '
-                      f'{source_sha} != {expected_sha}'
-                  )
-              (SITE_ROOT / destination).write_bytes(source_body)
-
-          after = {
-              relative: hashlib.sha256(
-                  (SITE_ROOT / relative).read_bytes()
-              ).hexdigest()
-              for relative in REQUIRED_PATHS
-          }
-          changed = sorted(
-              relative
-              for relative in REQUIRED_PATHS
-              if before[relative] != after[relative]
-          )
-          expected_changed = sorted(
-              destination
-              for destination, (_, expected_sha) in REPLACEMENTS.items()
-              if before[destination] != expected_sha
-          )
-
-          if changed != expected_changed:
-              raise RuntimeError(
-                  'Changed paths do not match live SVG files requiring '
-                  f'locked replacement: expected {expected_changed}; got {changed}'
-              )
-
-          if changed:
-              deployment_state = (
-                  f'STATE A - applied {len(changed)} locked icon replacement(s)'
-              )
-          else:
-              deployment_state = 'STATE B - all five icons already deployed and stable'
-
-          for destination, (_, expected_sha) in REPLACEMENTS.items():
-              if after[destination] != expected_sha:
-                  raise RuntimeError(
-                      f'Final SHA mismatch for {destination}: '
-                      f'{after[destination]} != {expected_sha}'
-                  )
-
-          print(f'Captured files: {len(REQUIRED_PATHS)}')
-          print(f'Deployment state: {deployment_state}')
-          print('Changed files:')
-          if changed:
-              for relative in changed:
-                  print(
-                      f'- {relative}: '
-                      f'{before[relative]} -> {after[relative]}'
-                  )
-          else:
-              print('- none; all five live SVG files were already locked')
-          print('All other captured files remained byte-identical.')
-          print('noindex, nofollow: PASS')
-          print('Same-origin HTML/CSS references: PASS')
-          PY
-
-      - name: Cache-bust locked icon references
+      - name: Repair preview-only path adaptation
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          from __future__ import annotations
-
-          import re
-          from html.parser import HTMLParser
-          from pathlib import Path, PurePosixPath
-          from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
-
-          BASE_URL = 'https://cloverwoodstudio.github.io/CLOVERWOOD-STUDIO-PREVIEW/'
-          BASE = urlsplit(BASE_URL)
-          BASE_PATH = BASE.path
-          SITE_ROOT = Path('deployment-site')
-          VERSION = 'logo-family-1.2.1-display-c3'
-          ICON_FILENAMES = (
-              'cloverwood-studio-symbol-web-v0.2.svg',
-              'icon-svet-outline-24.svg',
-              'nuku-symbol-master-v1.1.svg',
-              'icon-studio-outline-24.svg',
-              'bridge-os-symbol-master-v1.0.svg',
-          )
-          pattern = re.compile(
-              r'(?P<name>'
-              + '|'.join(re.escape(name) for name in ICON_FILENAMES)
-              + r')(?:\?v=[A-Za-z0-9._-]+)?'
-          )
-          counts = {name: 0 for name in ICON_FILENAMES}
-          changed_files: list[str] = []
-
-          for path in sorted(SITE_ROOT.rglob('*')):
-              if not path.is_file() or path.suffix.lower() not in {'.html', '.css'}:
-                  continue
-              original = path.read_text(encoding='utf-8')
-
-              def replace(match: re.Match[str]) -> str:
-                  name = match.group('name')
-                  counts[name] += 1
-                  return f'{name}?v={VERSION}'
-
-              rewritten = pattern.sub(replace, original)
-              if rewritten != original:
-                  path.write_text(rewritten, encoding='utf-8')
-                  changed_files.append(path.relative_to(SITE_ROOT).as_posix())
-
-          missing = sorted(name for name, count in counts.items() if count == 0)
-          if missing:
-              raise RuntimeError(
-                  f'No HTML/CSS references found for locked icons: {missing}'
-              )
-
-          class ReferenceParser(HTMLParser):
-              def __init__(self) -> None:
-                  super().__init__(convert_charrefs=True)
-                  self.references: list[str] = []
-
-              def handle_starttag(
-                  self,
-                  tag: str,
-                  attrs: list[tuple[str, str | None]],
-              ) -> None:
-                  values = dict(attrs)
-                  for name in ('src', 'href', 'poster'):
-                      value = values.get(name)
-                      if value:
-                          self.references.append(value)
-                  srcset = values.get('srcset')
-                  if srcset:
-                      for candidate in srcset.split(','):
-                          value = candidate.strip().split(' ', 1)[0]
-                          if value:
-                              self.references.append(value)
-
-          def clean_url(url: str) -> str:
-              parts = urlsplit(url)
-              return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
-
-          def destination_for(url: str) -> Path | None:
-              parts = urlsplit(clean_url(url))
-              if (parts.scheme, parts.netloc) != (BASE.scheme, BASE.netloc):
-                  return None
-              path = parts.path
-              if path == BASE_PATH.rstrip('/'):
-                  relative = 'index.html'
-              elif path.startswith(BASE_PATH):
-                  relative = path[len(BASE_PATH):]
-                  if not relative or relative.endswith('/'):
-                      relative += 'index.html'
-              else:
-                  return None
-              pure = PurePosixPath(unquote(relative))
-              if pure.is_absolute() or '..' in pure.parts:
-                  raise RuntimeError(f'Unsafe local path derived from URL: {url}')
-              return SITE_ROOT.joinpath(*pure.parts)
-
-          def references_from(path: Path, source_url: str) -> list[str]:
-              text = path.read_text(encoding='utf-8')
-              refs: list[str] = []
-              if path.suffix.lower() == '.html':
-                  parser = ReferenceParser()
-                  parser.feed(text)
-                  refs.extend(parser.references)
-              else:
-                  refs.extend(
-                      match.group(2).strip()
-                      for match in re.finditer(
-                          r'url\(\s*(["\']?)(.*?)\1\s*\)',
-                          text,
-                          flags=re.IGNORECASE,
-                      )
-                  )
-                  refs.extend(
-                      match.group(2).strip()
-                      for match in re.finditer(
-                          r'@import\s+(["\'])(.*?)\1',
-                          text,
-                          flags=re.IGNORECASE,
-                      )
-                  )
-              return [
-                  urljoin(source_url, ref)
-                  for ref in refs
-                  if ref and not ref.startswith(
-                      ('#', 'data:', 'mailto:', 'tel:', 'javascript:')
-                  )
-              ]
-
-          unresolved: list[tuple[str, str]] = []
-          for path in sorted(SITE_ROOT.rglob('*')):
-              if not path.is_file() or path.suffix.lower() not in {'.html', '.css'}:
-                  continue
-              relative = path.relative_to(SITE_ROOT).as_posix()
-              source_url = urljoin(BASE_URL, relative)
-              for reference_url in references_from(path, source_url):
-                  destination = destination_for(reference_url)
-                  if destination is not None and not destination.is_file():
-                      unresolved.append((relative, reference_url))
-
-          if unresolved:
-              raise RuntimeError(
-                  f'Unresolved references after cache busting: {unresolved}'
-              )
-
-          print('Cache-busted locked icon references:')
-          for name in ICON_FILENAMES:
-              print(f'- {name}: {counts[name]} reference(s)')
-          print('Changed HTML/CSS files:')
-          if changed_files:
-              for relative in changed_files:
-                  print(f'- {relative}')
-          else:
-              print('- none; references were already versioned')
-          print('Post-cache-bust same-origin references: PASS')
+          from pathlib import Path
+          root = Path('deployment-site')
+          old = '/CLOVERWOOD-STUDIO-PREVIEW/CLOVERWOOD-STUDIO-PREVIEW/'
+          new = '/CLOVERWOOD-STUDIO-PREVIEW/'
+          changed = []
+          for path in root.rglob('*'):
+              if path.is_file() and path.suffix.lower() in {'.html', '.css', '.xml'}:
+                  text = path.read_text(encoding='utf-8')
+                  if old in text:
+                      path.write_text(text.replace(old, new), encoding='utf-8')
+                      changed.append(path.relative_to(root).as_posix())
+          if changed not in ([], ['index.html']):
+              raise SystemExit(f'Unexpected preview path repair scope: {changed}')
+          print(f'preview path repair: {changed or "none"}')
           PY
 
-      - name: Validate public preview boundary
+      - name: Validate exact current preview content
+        shell: bash
         run: |
-          test -f deployment-site/index.html
-          grep -q 'noindex, nofollow' deployment-site/index.html
-          if grep -R -i -E 'company os|api[_ -]?key|secret|password' deployment-site --include='*.html' --include='*.css' --include='*.xml' --include='*.txt'; then
-            echo 'Forbidden internal content found in public preview.'
+          set -euo pipefail
+          root=deployment-site
+          for path in \
+            index.html 404.html robots.txt sitemap.xml \
+            cloverwood/index.html nuku/index.html studio-os/index.html \
+            bridge-os/index.html o-studiu/index.html kontakt/index.html \
+            brand/cloverwood-world-family-symbol.svg \
+            brand/nuku-world-family-symbol.svg \
+            brand/studio-os-family-symbol.svg \
+            brand/bridge-os-family-symbol.svg; do
+            test -f "$root/$path"
+          done
+
+          grep -Fq 'noindex, nofollow' "$root/index.html"
+          grep -Fq 'Disallow: /' "$root/robots.txt"
+          grep -Fq 'My svet' "$root/index.html"
+          grep -Fq 'My ho objavujeme.' "$root/index.html"
+          grep -Fq '>NUKU<' "$root/index.html"
+          grep -Fq 'Autorský svet s vlastným kánonom, postavami a pravidlami kontinuity.' "$root/index.html"
+          grep -Fq 'Objaviť NUKU' "$root/index.html"
+          grep -Fq 'Spoznať Studio OS' "$root/index.html"
+          grep -Fq 'Spoznať Bridge OS' "$root/index.html"
+          grep -Fq 'mailto:cloverwoodstudio@gmail.com' "$root/kontakt/index.html"
+
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-world-family-symbol.svg' "$root/index.html"
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/nuku-world-family-symbol.svg' "$root/index.html"
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/studio-os-family-symbol.svg' "$root/index.html"
+          grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/bridge-os-family-symbol.svg' "$root/index.html"
+
+          if grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/icon-svet-outline-24.svg' "$root/index.html" || \
+             grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/nuku-symbol-master-v1.1.svg' "$root/index.html" || \
+             grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/icon-studio-outline-24.svg' "$root/index.html" || \
+             grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/bridge-os-symbol-master-v1.0.svg' "$root/index.html"; then
+            echo 'Old C/N/S/B card icon reference found.'
+            exit 1
+          fi
+
+          if grep -R -I -F 'Svet príbehov, postáv a miest zakorenený v jednej živej logike.' "$root"; then
+            echo 'Old Cloverwood copy found.'
+            exit 1
+          fi
+          if grep -R -I -F 'Zistiť viac' "$root"; then
+            echo 'Old CTA copy found.'
+            exit 1
+          fi
+          if grep -R -I -i -F 'Company OS' "$root"; then
+            echo 'Company OS public copy found.'
+            exit 1
+          fi
+          if grep -R -I -i -F 'hreflang' "$root"; then
+            echo 'hreflang unexpectedly present.'
+            exit 1
+          fi
+          if grep -R -I -F '/CLOVERWOOD-STUDIO-PREVIEW/CLOVERWOOD-STUDIO-PREVIEW/' "$root"; then
+            echo 'Duplicated preview base path found.'
             exit 1
           fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload static website
+      - name: Upload current preview artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: deployment-site
@@ -494,32 +130,75 @@ jobs:
   deploy:
     needs: validate
     runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy preview
+      - name: Deploy preview only
         id: deployment
         uses: actions/deploy-pages@v4
 
-  notify:
-    needs: [validate, deploy]
-    if: always()
+  verify-live:
+    needs: deploy
     runs-on: ubuntu-24.04
     steps:
-      - name: Record deployment result
-        uses: actions/github-script@v8
-        env:
-          VALIDATE_RESULT: ${{ needs.validate.result }}
-          DEPLOY_RESULT: ${{ needs.deploy.result }}
-          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+      - name: Wait for current preview to become live
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            if curl --fail --silent --location "$PREVIEW_URL" -o live-index.html && \
+               grep -Fq 'Autorský svet s vlastným kánonom, postavami a pravidlami kontinuity.' live-index.html && \
+               grep -Fq '/CLOVERWOOD-STUDIO-PREVIEW/brand/cloverwood-world-family-symbol.svg' live-index.html && \
+               grep -Fq '>NUKU<' live-index.html; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Current preview did not become live in time.'
+          exit 1
+
+      - name: Verify live symbols, copy and contact
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'noindex, nofollow' live-index.html
+          grep -Fq 'Objaviť NUKU' live-index.html
+          grep -Fq 'Spoznať Studio OS' live-index.html
+          grep -Fq 'Spoznať Bridge OS' live-index.html
+          ! grep -Fq 'Zistiť viac' live-index.html
+          ! grep -Fq 'Svet príbehov, postáv a miest zakorenený v jednej živej logike.' live-index.html
+          ! grep -Fq '/brand/icon-svet-outline-24.svg' live-index.html
+          ! grep -Fq '/brand/nuku-symbol-master-v1.1.svg' live-index.html
+          ! grep -Fq '/brand/icon-studio-outline-24.svg' live-index.html
+          ! grep -Fq '/brand/bridge-os-symbol-master-v1.0.svg' live-index.html
+          curl --fail --silent "$PREVIEW_URL"'brand/cloverwood-world-family-symbol.svg' >/dev/null
+          curl --fail --silent "$PREVIEW_URL"'brand/nuku-world-family-symbol.svg' >/dev/null
+          curl --fail --silent "$PREVIEW_URL"'brand/studio-os-family-symbol.svg' >/dev/null
+          curl --fail --silent "$PREVIEW_URL"'brand/bridge-os-family-symbol.svg' >/dev/null
+          curl --fail --silent "$PREVIEW_URL"'kontakt/' -o live-contact.html
+          grep -Fq 'mailto:cloverwoodstudio@gmail.com' live-contact.html
+
+      - name: Capture live desktop tablet mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$browser"
+          mkdir screenshots
+          "$browser" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,1000 --screenshot=screenshots/preview-desktop-1440.png "$PREVIEW_URL"
+          "$browser" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=1024,1366 --screenshot=screenshots/preview-tablet-1024.png "$PREVIEW_URL"
+          "$browser" --headless=new --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,844 --screenshot=screenshots/preview-mobile-390.png "$PREVIEW_URL"
+
+      - name: Upload live preview screenshots
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 2,
-              body: `PREVIEW_DEPLOYMENT_RESULT\nvalidate=${process.env.VALIDATE_RESULT}\ndeploy=${process.env.DEPLOY_RESULT}\nurl=${process.env.PAGE_URL || ''}`
-            })
+          name: cloverwood-current-main-live-preview-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 7
